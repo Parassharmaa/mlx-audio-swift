@@ -943,15 +943,14 @@ public extension ParakeetModel {
         return Data(text.utf8)
     }
 
-    static func fromDirectory(
-        _ modelDir: URL,
+    /// Construct the graph without loading weights so callers can install
+    /// custom packed modules before a strict parameter update.
+    static func fromConfiguration(
+        _ rawConfigData: Data,
         computeDType: DType = .bfloat16
     ) throws -> ParakeetModel {
-        let configURL = modelDir.appendingPathComponent("config.json")
-        let rawConfigData = try Data(contentsOf: configURL)
         let configData = normalizedConfigData(rawConfigData)
         let rawConfig = try JSONDecoder().decode(ParakeetRawConfig.self, from: configData)
-        let quantConfig = try JSONDecoder().decode(ParakeetQuantizationConfig.self, from: configData)
         let variant = try ParakeetVariantResolver.resolve(rawConfig)
 
         let model: ParakeetModel
@@ -1010,6 +1009,18 @@ public extension ParakeetModel {
             )
         }
 
+        model.computeDType = computeDType
+        return model
+    }
+
+    static func fromDirectory(
+        _ modelDir: URL,
+        computeDType: DType = .bfloat16
+    ) throws -> ParakeetModel {
+        let configURL = modelDir.appendingPathComponent("config.json")
+        let configData = normalizedConfigData(try Data(contentsOf: configURL))
+        let model = try fromConfiguration(configData, computeDType: computeDType)
+        let quantConfig = try JSONDecoder().decode(ParakeetQuantizationConfig.self, from: configData)
         var weights: [String: MLXArray] = [:]
         let files = try FileManager.default.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)
         let safetensors = files.filter { $0.pathExtension == "safetensors" }
@@ -1200,4 +1211,3 @@ private extension Array {
         return self[index]
     }
 }
-
