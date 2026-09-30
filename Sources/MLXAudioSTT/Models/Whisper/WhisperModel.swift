@@ -216,6 +216,13 @@ public final class WhisperModel: Module, STTGenerationModel {
         var previousText = ""
         let beginSuppress = generationConfig?.beginSuppressTokens ?? [tokenizer.endOfTextId]
         let suppress = generationConfig?.suppressTokens ?? []
+        let logitSuppression = WhisperLogitSuppression(
+            vocabularySize: logits.dim(-1),
+            dtype: logits.dtype,
+            beginSuppress: beginSuppress,
+            suppress: suppress,
+            timestampBegin: tokenizer.timestampBeginId
+        )
 
         let maxTokens = max(
             1,
@@ -226,14 +233,7 @@ public final class WhisperModel: Module, STTGenerationModel {
         )
 
         for step in 0..<maxTokens {
-            var stepLogits = logits
-            if step == 0, !beginSuppress.isEmpty {
-                stepLogits = suppressLogits(stepLogits, ids: beginSuppress)
-            }
-            if !suppress.isEmpty {
-                stepLogits = suppressLogits(stepLogits, ids: suppress)
-            }
-            stepLogits = suppressFromIndex(stepLogits, fromIndex: tokenizer.timestampBeginId)
+            let stepLogits = logitSuppression.apply(to: logits, firstToken: step == 0)
 
             let nextToken = sample(stepLogits, temperature: generationParameters.temperature)
             if nextToken == tokenizer.endOfTextId { break }
@@ -288,24 +288,6 @@ public final class WhisperModel: Module, STTGenerationModel {
         }
         let scaled = (logits1D / temperature).expandedDimensions(axis: 0)
         return categorical(scaled).item(Int.self)
-    }
-
-    private func suppressLogits(_ logits: MLXArray, ids: [Int]) -> MLXArray {
-        if ids.isEmpty { return logits }
-        let length = logits.dim(-1)
-        var mask = [Float](repeating: 0, count: length)
-        for id in ids where id >= 0 && id < length {
-            mask[id] = -1e9
-        }
-        return logits + MLXArray(mask).asType(logits.dtype)
-    }
-
-    private func suppressFromIndex(_ logits: MLXArray, fromIndex: Int) -> MLXArray {
-        let length = logits.dim(-1)
-        if fromIndex >= length { return logits }
-        var mask = [Float](repeating: 0, count: length)
-        for i in fromIndex..<length { mask[i] = -1e9 }
-        return logits + MLXArray(mask).asType(logits.dtype)
     }
 
     // MARK: - Loading
